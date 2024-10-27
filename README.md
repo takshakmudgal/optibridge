@@ -20,6 +20,7 @@
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
+- [Running with Docker](#running-with-docker)
 
 ## Introduction
 
@@ -58,7 +59,7 @@ Ensure you have the following installed on your system:
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/your-username/optibridge.git
+   git clone https://github.com/takshakmudgal/optibridge.git
    cd optibridge
    ```
 
@@ -295,6 +296,54 @@ Contributions are welcome! Please follow these steps to contribute:
 5. **Open a Pull Request**
 
 Please ensure your code adheres to the project's coding standards and passes all existing tests.
+
+## Running with Docker
+
+To run **optibridge** using Docker, follow these steps:
+
+### Prerequisites
+
+- [Docker](https://www.docker.com/get-started) installed on your system.
+- [Docker Compose](https://docs.docker.com/compose/install/) installed.
+
+### Steps
+
+1. **Clone the Repository**
+
+   ```bash
+   git clone https://github.com/takshakmudgal/optibridge.git
+   cd optibridge
+   ```
+
+2. **Create a `.env` File**
+
+   Create a `.env` file in the root directory and add your environment variables:
+
+   ```env
+   SOCKET_API_KEY=your_socket_api_key
+   PORT=3000
+   ```
+
+3. **Build and Run with Docker Compose**
+
+   ```bash
+   docker-compose up --build
+   ```
+
+   This command will build the Docker image and start both the application and Redis services. The application will be accessible at [http://localhost:3000](http://localhost:3000).
+
+4. **Stopping the Services**
+
+   To stop the services, press `Ctrl + C` in the terminal where Docker Compose is running, then execute:
+
+   ```bash
+   docker-compose down
+   ```
+
+### Notes
+
+- The application code is mounted into the Docker container, allowing for live-reloading during development.
+- Redis data is persisted using Docker volumes to prevent data loss between restarts.
 
 ## License
 
