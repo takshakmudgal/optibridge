@@ -39,7 +39,7 @@ export const CHAIN_CONFIG: { [key: string]: ChainConfig } = {
     name: "Blast",
     chainId: 81457,
     nativeToken: "ETH",
-    usdcAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-    rpcUrl: "https://blast.blockpi.network/v1/rpc/public",
+    usdcAddress: "0x4300000000000000000000000000000000000003",
+    rpcUrl: "https://rpc.blastblockchain.com/",
   },
 };

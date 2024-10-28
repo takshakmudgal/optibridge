@@ -5,13 +5,13 @@ import { bridgeRequestSchema } from "./utils/validation";
 const app = new Elysia();
 const bridgeController = new BridgeController();
 
-bridgeController.setTestMode({
-  polygon: 50,
-  arbitrum: 100,
-  base: 80,
-  gnosis: 25,
-  blast: 30,
-});
+// bridgeController.setTestMode({
+//   polygon: 50,
+//   arbitrum: 100,
+//   base: 80,
+//   gnosis: 25,
+//   blast: 30,
+// });
 
 app
   .post("/api/bridge/routes", async ({ body }) => {

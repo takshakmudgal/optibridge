@@ -21,7 +21,16 @@ export class SocketApiService {
     amount: string,
     tokenAddress: string,
     userAddress: string
-  ) {
+  ): Promise<{
+    route: {
+      userTxs: Array<{
+        gasFee: number;
+        bridgeFee: number;
+        estimatedTime: number;
+        protocol: string;
+      }>;
+    };
+  }> {
     const fromChainId = CHAIN_CONFIG[fromChain]?.chainId;
     const toChainId = CHAIN_CONFIG[toChain]?.chainId;
 
@@ -31,36 +40,20 @@ export class SocketApiService {
       );
     }
 
-    if (fromChain === toChain) {
-      return {
-        route: {
-          userTxs: [
-            {
-              gasFee: 0,
-              bridgeFee: 0, // No bridge fee needed if same chain
-              estimatedTime: 0,
-            },
-          ],
-        },
-      };
-    }
-
-    const cacheKey = `bridge_fee:${fromChainId}:${toChainId}:${amount}:${tokenAddress}`;
-
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      return JSON.parse(cachedData);
-    }
-
     try {
-      const amountInWei = (Number(amount) * 1e6).toString();
+      // Convert amount to Wei (6 decimals for USDC)
+      const amountInWei = Math.floor(Number(amount) * 1e6).toString();
+      
+      // Use the correct token addresses from the source and target chains
+      const fromTokenAddress = CHAIN_CONFIG[fromChain].usdcAddress;
+      const toTokenAddress = CHAIN_CONFIG[toChain].usdcAddress;
 
       console.log("Requesting Socket API quote:", {
         fromChain,
         toChain,
         amount: amountInWei,
-        fromTokenAddress: CHAIN_CONFIG[fromChain].usdcAddress,
-        toTokenAddress: CHAIN_CONFIG[toChain].usdcAddress,
+        fromTokenAddress,
+        toTokenAddress,
         userAddress,
       });
 
@@ -74,10 +67,10 @@ export class SocketApiService {
           params: {
             fromChainId: fromChainId.toString(),
             toChainId: toChainId.toString(),
-            fromTokenAddress: CHAIN_CONFIG[fromChain].usdcAddress,
-            toTokenAddress: CHAIN_CONFIG[toChain].usdcAddress,
+            fromTokenAddress,
+            toTokenAddress,
             fromAmount: amountInWei,
-            userAddress: userAddress,
+            userAddress,
             uniqueRoutesPerBridge: true,
             sort: "output",
             singleTxOnly: true,
@@ -85,80 +78,51 @@ export class SocketApiService {
         }
       );
 
-      console.log("Socket API Response:", {
-        success: response.data.success,
-        routesCount: response.data.result?.routes?.length || 0,
-      });
-
       if (!response.data.success) {
-        throw new Error(
-          `Socket API request failed for ${fromChain} to ${toChain}`
-        );
+        console.error("Socket API error response:", response.data);
+        throw new Error(`Socket API request failed: ${(response.data as any).message || 'Unknown error'}`);
       }
 
       if (!response.data.result?.routes?.length) {
-        console.log(
-          `No Socket routes available, using fallback fees for ${fromChain} to ${toChain}`
-        );
-        return {
-          route: {
-            userTxs: [
-              {
-                gasFee: 0,
-                bridgeFee: BRIDGE_FEES[fromChain]?.[toChain] || 0,
-                estimatedTime: 60,
-                protocol: "fallback",
-              },
-            ],
-          },
-        };
+        console.warn(`No routes available from ${fromChain} to ${toChain}`);
+        throw new Error(`No valid routes found from ${fromChain} to ${toChain}`);
       }
 
       const bestRoute = response.data.result.routes[0];
-      const bridgeFee = BRIDGE_FEES[fromChain]?.[toChain] || 0;
+      const gasFee = Number(bestRoute.totalGasFeeUSD || 0);
+      const bridgeFee = Number(bestRoute.totalBridgeFeeUSD || 0);
 
-      const result = {
-        route: {
-          userTxs: [
-            {
-              gasFee: Number(bestRoute.totalGasFeeUSD || 0),
-              bridgeFee: bridgeFee,
-              estimatedTime: bestRoute.serviceTime || 60,
-            },
-          ],
-        },
-      };
-
-      await redisClient.setEx(cacheKey, CACHE_TTL, JSON.stringify(result));
-      return result;
-    } catch (error: any) {
-      console.error("Socket API Error Details:", {
-        status: error.response?.status,
-        data: error.response?.data,
-        config: {
-          ...error.config,
-          headers: {
-            ...error.config?.headers,
-            "API-KEY": "***",
-          },
-        },
-      });
-
-      console.log(
-        `Using fallback fees for ${fromChain} to ${toChain} due to API error`
-      );
+      // Ensure fees are displayed with proper precision
       return {
         route: {
           userTxs: [
             {
-              gasFee: 0,
-              bridgeFee: BRIDGE_FEES[fromChain]?.[toChain] || 0,
-              estimatedTime: 60,
-              protocol: "fallback",
+              gasFee: Number(gasFee.toFixed(6)),
+              bridgeFee: Number(bridgeFee.toFixed(6)),
+              estimatedTime: bestRoute.serviceTime || 60,
+              protocol: bestRoute.protocol || "unknown",
             },
           ],
         },
       };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error("Socket API Error:", {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+        
+        // Add retry logic for 500 errors
+        if (error.response?.status === 500) {
+          console.log("Retrying request due to 500 error...");
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return this.getBridgeFees(fromChain, toChain, amount, tokenAddress, userAddress);
+        }
+        
+        throw new Error(`Socket API error: ${error.response?.data?.message || error.message}`);
+      }
+      throw error;
     }
   }
 }

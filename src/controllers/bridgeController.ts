@@ -143,7 +143,32 @@ export class BridgeController {
       );
 
       const balances = await Promise.all(balancePromises);
+      const targetBalance = balances.find(b => b.chain === request.targetChain)?.balance || 0;
+
       console.log("All chain balances:", balances);
+      console.log(`Target chain (${request.targetChain}) balance:`, targetBalance);
+
+      // If target chain has sufficient balance, return early with a simplified response
+      if (targetBalance >= request.amount) {
+        const result = {
+          success: true,
+          data: {
+            routes: [],
+            totalFee: 0,
+            totalAmount: targetBalance,
+            estimatedTotalTime: 0,
+            availableBalance: targetBalance,
+            requiredAmount: request.amount,
+            insufficientFunds: false,
+            noValidRoutes: false,
+            bridgeRoutes: [],
+            targetChain: request.targetChain,
+            shortfall: 0
+          }
+        };
+        await redisClient.setEx(cacheKey, this.CACHE_TTL, JSON.stringify(result));
+        return result;
+      }
 
       const routes = await this.routeCalculator.findOptimalRoutes(
         balances,
@@ -153,7 +178,7 @@ export class BridgeController {
         request.userAddress
       );
 
-      let errorMessage;
+      let errorMessage = null;
       if (routes.insufficientFunds) {
         errorMessage = "Insufficient funds across all chains";
       } else if (routes.noValidRoutes) {
@@ -175,7 +200,7 @@ export class BridgeController {
           targetChain: request.targetChain,
           shortfall: Math.max(0, request.amount - routes.totalAmount),
         },
-        error: errorMessage,
+        error: errorMessage
       };
 
       await redisClient.setEx(cacheKey, this.CACHE_TTL, JSON.stringify(result));
