@@ -17,30 +17,38 @@ export class RouteCalculator {
     tokenAddress: string,
     userAddress: string
   ): Promise<BridgeRoute> {
-    // Round to 6 decimal places to avoid floating point issues
     const neededAmount = Number(amount.toFixed(6));
     
-    const bridgeFees = await this.socketApiService.getBridgeFees(
-      sourceChain.chain,
-      targetChain,
-      neededAmount.toString(),
-      tokenAddress,
-      userAddress
-    );
+    try {
+      const bridgeFees = await this.socketApiService.getBridgeFees(
+        sourceChain.chain,
+        targetChain,
+        neededAmount.toString(),
+        tokenAddress,
+        userAddress
+      );
 
-    const gasFee = bridgeFees.route.userTxs[0].gasFee;
-    const bridgeFee = bridgeFees.route.userTxs[0].bridgeFee;
-    const totalFee = Number((gasFee + bridgeFee).toFixed(6));
+      const gasFee = bridgeFees.route.userTxs[0].gasFee;
+      const bridgeFee = bridgeFees.route.userTxs[0].bridgeFee;
+      const totalFee = Number((gasFee + bridgeFee).toFixed(6));
 
-    return {
-      sourceChain: sourceChain.chain,
-      amount: neededAmount,
-      fee: totalFee > 0 ? totalFee : 0.000001,
-      estimatedTime: bridgeFees.route.userTxs[0].estimatedTime,
-      protocol: bridgeFees.route.userTxs[0].protocol || "unknown",
-      gasToken: CHAIN_CONFIG[sourceChain.chain].nativeToken || "ETH",
-      sourceBalance: sourceChain.balance,
-    };
+      // Apply minimum fee threshold
+      const minFee = 0.000001;
+      const finalFee = totalFee > 0 ? Math.max(totalFee, minFee) : minFee;
+
+      return {
+        sourceChain: sourceChain.chain,
+        amount: neededAmount,
+        fee: finalFee,
+        estimatedTime: bridgeFees.route.userTxs[0].estimatedTime,
+        protocol: bridgeFees.route.userTxs[0].protocol,
+        gasToken: CHAIN_CONFIG[sourceChain.chain].nativeToken,
+        sourceBalance: sourceChain.balance
+      };
+    } catch (error) {
+      console.error(`Error calculating route fees: ${error}`);
+      throw error;
+    }
   }
 
   async findOptimalRoutes(
