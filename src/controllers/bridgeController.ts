@@ -148,7 +148,6 @@ export class BridgeController {
       console.log("All chain balances:", balances);
       console.log(`Target chain (${request.targetChain}) balance:`, targetBalance);
 
-      // If target chain has sufficient balance, return early with a simplified response
       if (targetBalance >= request.amount) {
         const result = {
           success: true,

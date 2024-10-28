@@ -4,44 +4,72 @@ import { CHAIN_CONFIG } from "../config/chains";
 import { ENV } from "../config/env";
 import { SocketQuoteResponse } from "../types/socket";
 import { BASE_GAS_FEE, BRIDGE_FEES, GAS_MULTIPLIERS } from "../config/bridgeFees";
+import { ethers } from "ethers";
 
 const CACHE_TTL = 300; // 5 minutes
 
 export class SocketApiService {
   private readonly apiKey: string;
   private readonly baseUrl = "https://api.socket.tech/v2";
+  private providers: Record<string, ethers.JsonRpcProvider>;
 
   constructor() {
     this.apiKey = ENV.SOCKET_API_KEY;
+    this.providers = {};
+    
+   
+    Object.entries(CHAIN_CONFIG).forEach(([chain, config]) => {
+      this.providers[chain] = new ethers.JsonRpcProvider(config.rpcUrl, undefined, {
+        staticNetwork: true,
+        polling: true,
+        pollingInterval: 4000
+      });
+    });
   }
 
-  private calculateFallbackFees(
+  private async getGasPrice(chain: string): Promise<bigint> {
+    try {
+      const provider = this.providers[chain];
+      if (!provider) {
+        throw new Error(`No provider found for chain: ${chain}`);
+      }
+
+    
+      const feeData = await provider.getFeeData();
+      return feeData.gasPrice ?? BigInt(0);
+    } catch (error) {
+      console.error(`Error getting gas price for ${chain}:`, error);
+ 
+      return BigInt(30000000000);
+    }
+  }
+
+  private async calculateFallbackFees(
     fromChain: string,
     toChain: string,
     amount: number
-  ): { gasFee: number; bridgeFee: number } {
-    // Get the base bridge fee from configuration
+  ): Promise<{ gasFee: number; bridgeFee: number }> {
+
     const bridgeFeePercentage = BRIDGE_FEES[fromChain]?.[toChain] || 1.5;
     const gasMultiplier = GAS_MULTIPLIERS[fromChain] || 1;
     
-    // Calculate fees
-    // Base bridge fee is a percentage of the amount
+
+    const gasPrice = await this.getGasPrice(fromChain);
+    const gasPriceInGwei = Number(ethers.formatUnits(gasPrice, "gwei"));
+    
+  
+    const AVERAGE_GAS_UNITS = 200000; 
+    const baseGasFee = (gasPriceInGwei * AVERAGE_GAS_UNITS * gasMultiplier) / 1e9;
     const baseBridgeFee = (amount * bridgeFeePercentage) / 100;
     
-    // Base gas fee calculation with chain-specific multiplier
-    const baseGasFee = Math.max(
-      (amount * 0.001), // 0.1% minimum gas fee
-      BASE_GAS_FEE * gasMultiplier * amount // Scale with amount
-    );
-    
-    // Apply volume-based discounts for larger amounts
+ 
     const volumeDiscount = amount > 1000 ? 0.8 : amount > 500 ? 0.9 : 1;
     
-    // Ensure minimum fees
-    const minFee = 0.5; // Minimum fee of 0.5 USDC
+    
+    const minFee = 0.5;
     
     return {
-      gasFee: Math.max(Number((baseGasFee * gasMultiplier).toFixed(6)), minFee),
+      gasFee: Math.max(Number(baseGasFee.toFixed(6)), minFee),
       bridgeFee: Math.max(Number((baseBridgeFee * volumeDiscount).toFixed(6)), minFee)
     };
   }
@@ -63,10 +91,10 @@ export class SocketApiService {
     };
   }> {
     try {
-      // Convert amount to Wei (6 decimals for USDC)
+  
       const amountInWei = Math.floor(Number(amount) * 1e6).toString();
       
-      // Use the correct token addresses from the source and target chains
+   
       const fromTokenAddress = CHAIN_CONFIG[fromChain].usdcAddress;
       const toTokenAddress = CHAIN_CONFIG[toChain].usdcAddress;
 
@@ -114,9 +142,9 @@ export class SocketApiService {
       let gasFee = Number(bestRoute.totalGasFeeUSD || 0);
       let bridgeFee = Number(bestRoute.totalBridgeFeeUSD || 0);
 
-      // If API returns zero or very low fees, use fallback calculation
+    
       if (gasFee < 0.5 || bridgeFee < 0.5) {
-        const fallbackFees = this.calculateFallbackFees(
+        const fallbackFees = await this.calculateFallbackFees(
           fromChain,
           toChain,
           Number(amount)
@@ -125,7 +153,7 @@ export class SocketApiService {
         bridgeFee = fallbackFees.bridgeFee;
       }
 
-      // Ensure fees are displayed with proper precision
+      
       return {
         route: {
           userTxs: [
@@ -139,8 +167,8 @@ export class SocketApiService {
         },
       };
     } catch (error) {
-      // Use fallback fees when API fails
-      const fallbackFees = this.calculateFallbackFees(
+    
+      const fallbackFees = await this.calculateFallbackFees(
         fromChain,
         toChain,
         Number(amount)
@@ -152,7 +180,7 @@ export class SocketApiService {
             {
               gasFee: fallbackFees.gasFee,
               bridgeFee: fallbackFees.bridgeFee,
-              estimatedTime: 300, // 5 minutes default
+              estimatedTime: 300,
               protocol: "fallback",
             },
           ],

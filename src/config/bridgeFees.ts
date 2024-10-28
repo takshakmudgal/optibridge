@@ -27,16 +27,16 @@ export const BRIDGE_FEES: Record<string, Record<string, number>> = {
     arbitrum: 0.7,
     base: 0.6,
     gnosis: 0.4,
-    blast: 1.0 // Higher fee for Blast as it's a newer chain
+    blast: 1.0 
   }
 };
 
 export const GAS_MULTIPLIERS: Record<string, number> = {
-  arbitrum: 1.2,  // Higher gas costs on Arbitrum
+  arbitrum: 1.2, 
   base: 1.1,
-  gnosis: 0.8,    // Lower gas costs on Gnosis
-  blast: 1.3,     // Higher gas costs on Blast
-  polygon: 0.9    // Lower gas costs on Polygon
+  gnosis: 0.8, 
+  blast: 1.3,   
+  polygon: 0.9 
 };
 
-export const BASE_GAS_FEE = 0.001; // Base gas fee in USDC
+export const BASE_GAS_FEE = 0.001;

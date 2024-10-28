@@ -32,7 +32,6 @@ export class RouteCalculator {
       const bridgeFee = bridgeFees.route.userTxs[0].bridgeFee;
       const totalFee = Number((gasFee + bridgeFee).toFixed(6));
 
-      // Apply minimum fee threshold
       const minFee = 0.000001;
       const finalFee = totalFee > 0 ? Math.max(totalFee, minFee) : minFee;
 
@@ -58,7 +57,7 @@ export class RouteCalculator {
     tokenAddress: string,
     userAddress: string
   ): Promise<RouteResponse> {
-    // First, check target chain balance
+   
     const targetBalance = balances.find(b => b.chain === targetChain)?.balance || 0;
     const actuallyNeededAmount = Math.max(0, requiredAmount - targetBalance);
 
@@ -67,12 +66,12 @@ export class RouteCalculator {
       .sort((a, b) => b.balance - a.balance);
 
     const routes: BridgeRoute[] = [];
-    let totalAmount = targetBalance; // Start with target chain balance
+    let totalAmount = targetBalance; 
     let totalFee = 0;
     let maxEstimatedTime = 0;
     const availableBalance = balances.reduce((sum, b) => sum + b.balance, 0);
 
-    // If we don't need to bridge anything, return early
+
     if (actuallyNeededAmount <= 0) {
       return {
         routes: [],
@@ -87,7 +86,7 @@ export class RouteCalculator {
       };
     }
 
-    // Check if we have enough funds in source chains
+
     const totalSourceFunds = sourceChains.reduce((sum, chain) => sum + chain.balance, 0);
     if (totalSourceFunds < actuallyNeededAmount) {
       return {
@@ -110,7 +109,7 @@ export class RouteCalculator {
       if (remainingAmount <= 0) break;
 
       const amountFromThisChain = Math.min(sourceChain.balance, remainingAmount);
-      if (amountFromThisChain < 0.1) continue; // Skip tiny amounts
+      if (amountFromThisChain < 0.1) continue; 
 
       try {
         const route = await this.calculateSingleSourceRoute(
