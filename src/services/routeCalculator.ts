@@ -3,6 +3,13 @@ import { SocketApiService } from "./socketApi";
 import { CHAIN_CONFIG } from "../config/chains";
 import { BRIDGE_FEES } from "../config/bridgeFees";
 
+interface CombinationResult {
+  chains: string[];
+  totalAmount: number;
+  totalFee: number;
+  routes: BridgeRoute[];
+}
+
 export class RouteCalculator {
   private socketApiService: SocketApiService;
 
@@ -50,6 +57,70 @@ export class RouteCalculator {
     }
   }
 
+  private getCombinations<T>(arr: T[]): T[][] {
+    const result: T[][] = [];
+    
+    for (let i = 1; i < (1 << arr.length); i++) {
+      const combination: T[] = [];
+      for (let j = 0; j < arr.length; j++) {
+        if (i & (1 << j)) {
+          combination.push(arr[j]);
+        }
+      }
+      result.push(combination);
+    }
+    
+    return result;
+  }
+
+  private async evaluateCombination(
+    sourceChains: ChainBalance[],
+    targetChain: string,
+    requiredAmount: number,
+    tokenAddress: string,
+    userAddress: string
+  ): Promise<CombinationResult> {
+    let totalAmount = 0;
+    let totalFee = 0;
+    const routes: BridgeRoute[] = [];
+
+    const totalAvailable = sourceChains.reduce((sum, chain) => sum + chain.balance, 0);
+    const remainingNeeded = requiredAmount;
+    
+    for (const sourceChain of sourceChains) {
+      const proportion = sourceChain.balance / totalAvailable;
+      const amountFromThisChain = Math.min(
+        sourceChain.balance,
+        remainingNeeded * proportion
+      );
+
+      if (amountFromThisChain >= 0.1) {
+        try {
+          const route = await this.calculateSingleSourceRoute(
+            { ...sourceChain, balance: amountFromThisChain },
+            targetChain,
+            amountFromThisChain,
+            tokenAddress,
+            userAddress
+          );
+
+          routes.push(route);
+          totalAmount += amountFromThisChain;
+          totalFee += route.fee;
+        } catch (error) {
+          console.error(`Failed to get route from ${sourceChain.chain}:`, error);
+        }
+      }
+    }
+
+    return {
+      chains: sourceChains.map(c => c.chain),
+      totalAmount,
+      totalFee,
+      routes
+    };
+  }
+
   async findOptimalRoutes(
     balances: ChainBalance[],
     targetChain: string,
@@ -57,28 +128,16 @@ export class RouteCalculator {
     tokenAddress: string,
     userAddress: string
   ): Promise<RouteResponse> {
-   
     const targetBalance = balances.find(b => b.chain === targetChain)?.balance || 0;
     const actuallyNeededAmount = Math.max(0, requiredAmount - targetBalance);
-
-    const sourceChains = balances
-      .filter(b => b.chain !== targetChain && b.balance > 0)
-      .sort((a, b) => b.balance - a.balance);
-
-    const routes: BridgeRoute[] = [];
-    let totalAmount = targetBalance; 
-    let totalFee = 0;
-    let maxEstimatedTime = 0;
-    const availableBalance = balances.reduce((sum, b) => sum + b.balance, 0);
-
-
+    
     if (actuallyNeededAmount <= 0) {
       return {
         routes: [],
         totalFee: 0,
-        totalAmount,
+        totalAmount: targetBalance,
         estimatedTotalTime: 0,
-        availableBalance,
+        availableBalance: balances.reduce((sum, b) => sum + b.balance, 0),
         requiredAmount,
         insufficientFunds: false,
         noValidRoutes: false,
@@ -86,64 +145,53 @@ export class RouteCalculator {
       };
     }
 
+    const sourceChains = balances.filter(b => b.chain !== targetChain && b.balance > 0);
+    const combinations = this.getCombinations(sourceChains);
+    
+    let bestResult: CombinationResult | null = null;
 
-    const totalSourceFunds = sourceChains.reduce((sum, chain) => sum + chain.balance, 0);
-    if (totalSourceFunds < actuallyNeededAmount) {
+    for (const combination of combinations) {
+      const result = await this.evaluateCombination(
+        combination,
+        targetChain,
+        actuallyNeededAmount,
+        tokenAddress,
+        userAddress
+      );
+
+      if (result.totalAmount >= actuallyNeededAmount) {
+        if (!bestResult || result.totalFee < bestResult.totalFee) {
+          bestResult = result;
+        }
+      }
+    }
+
+    if (!bestResult) {
       return {
         routes: [],
         totalFee: 0,
-        totalAmount: totalSourceFunds + targetBalance,
+        totalAmount: targetBalance,
         estimatedTotalTime: 0,
-        availableBalance,
+        availableBalance: balances.reduce((sum, b) => sum + b.balance, 0),
         requiredAmount,
         insufficientFunds: true,
-        noValidRoutes: false,
+        noValidRoutes: true,
         bridgeRoutes: []
       };
     }
 
-    let remainingAmount = actuallyNeededAmount;
-    console.log(`Starting multi-chain route calculation with remaining amount: ${remainingAmount}`);
-
-    for (const sourceChain of sourceChains) {
-      if (remainingAmount <= 0) break;
-
-      const amountFromThisChain = Math.min(sourceChain.balance, remainingAmount);
-      if (amountFromThisChain < 0.1) continue; 
-
-      try {
-        const route = await this.calculateSingleSourceRoute(
-          { ...sourceChain, balance: amountFromThisChain },
-          targetChain,
-          amountFromThisChain,
-          tokenAddress,
-          userAddress
-        );
-
-        routes.push(route);
-        totalAmount += amountFromThisChain;
-        totalFee += route.fee;
-        maxEstimatedTime = Math.max(maxEstimatedTime, route.estimatedTime);
-        remainingAmount -= amountFromThisChain;
-
-        console.log(`Added route from ${sourceChain.chain} for ${amountFromThisChain} USDC`);
-        console.log(`Remaining amount needed: ${remainingAmount}`);
-      } catch (error) {
-        console.error(`Failed to get route from ${sourceChain.chain}:`, error);
-        continue;
-      }
-    }
+    const maxEstimatedTime = Math.max(...bestResult.routes.map(r => r.estimatedTime));
 
     return {
-      routes,
-      totalFee,
-      totalAmount,
+      routes: bestResult.routes,
+      totalFee: bestResult.totalFee,
+      totalAmount: targetBalance + bestResult.totalAmount,
       estimatedTotalTime: maxEstimatedTime,
-      availableBalance,
+      availableBalance: balances.reduce((sum, b) => sum + b.balance, 0),
       requiredAmount,
-      insufficientFunds: totalAmount < requiredAmount,
-      noValidRoutes: routes.length === 0,
-      bridgeRoutes: routes.map(route => ({
+      insufficientFunds: false,
+      noValidRoutes: false,
+      bridgeRoutes: bestResult.routes.map(route => ({
         sourceChain: route.sourceChain,
         amount: route.amount,
         fee: route.fee,
